@@ -90,27 +90,24 @@ func doTheBreak(conn *irc.Conn, urlToUse string, theirNick string, replyTo strin
 			lineComplete = !isPrefix
 		}
 
+		log.Printf("%s: REPORTED %s\n", urlToUse, lineStr)
 		if strings.HasPrefix(lineStr, "STARTED") {
-			log.Printf("%s: REPORTED STARTED\n", urlToUse)
 			startedTime = time.Now()
 		} else if strings.HasPrefix(lineStr, "BROKE ") {
-			log.Printf("%s: REPORTED BROKE: %s\n", urlToUse, lineStr)
 			// now we tell them, but not much :)
 			lineBits := strings.Split(lineStr, " ")
 			chunkBrokenInt64, _ := strconv.ParseInt(lineBits[1], 10, 0)
 			//actualNumberInt64, err := strconv.ParseInt(lineBits[2], 10, 0)
 			// tell them
-			sendPublicMessage(conn, replyTo, theirNick, serverId, userId, fmt.Sprintf("I've broken chunk #%d!", chunkBrokenInt64+1))
+			sendPublicMessage(conn, replyTo, theirNick, serverId, userId, fmt.Sprintf("I've broken %d%% of your flag!", (chunkBrokenInt64+1)*25))
 		} else if strings.HasPrefix(lineStr, "BROKE_ALL ") {
-			log.Printf("%s: REPORTED BROKE_ALL: %s\n", urlToUse, lineStr)
 			// now we tell them, but not much :)
 			//lineBits := strings.Split(lineStr, " ")
 			//chunkBrokenInt64, err := strconv.ParseInt(lineBits[1], 10, 0)
 			//actualNumberInt64, err := strconv.ParseInt(lineBits[2], 10, 0)
 			// tell them
-			sendPublicMessage(conn, replyTo, theirNick, serverId, userId, "I've broken all your chunks and 0wn your flag. All your flag are belong to me! My badly optimized code did it in "+time.Since(startedTime).String()+", too.")
+			sendPublicMessage(conn, replyTo, theirNick, serverId, userId, "All your flag are belong to me! My badly optimized code did it in "+time.Since(startedTime).String()+", too.")
 		} else if strings.HasPrefix(lineStr, "INVALID_URL") {
-			log.Printf("%s: REPORTED INVALID_URL: %s\n", urlToUse, lineStr)
 			sendPublicMessage(conn, replyTo, theirNick, serverId, userId, "'"+urlToUse+"' doesn't seem like a valid flag URL.")
 			return
 		}
@@ -126,7 +123,7 @@ func main() {
 
 	flag.Parse()
 
-	c := irc.SimpleClient("RealFlagBot")
+	c := irc.SimpleClient("FlagBot|lukegb")
 
 	c.SSL = true
 
@@ -150,7 +147,7 @@ func main() {
 			sentTo = "__ME__"
 			replyTo = line.Nick
 		}
-		log.Printf("%s <%s> %s\n", line.Args[0], line.Nick, lineData)
+		//log.Printf("%s <%s> %s\n", line.Args[0], line.Nick, lineData)
 		if matches != nil {
 			meineUrl := fmt.Sprintf("https://level08-%s.stripe-ctf.com/user-%s/", matches[1], matches[2])
 			log.Printf(" ---> FOUND URL: %s - using %s\n", matches[0], meineUrl)
