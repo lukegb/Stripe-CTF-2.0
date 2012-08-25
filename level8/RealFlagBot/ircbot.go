@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	irc "github.com/fluffle/goirc/client"
 	"io"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -19,6 +21,72 @@ var usedMeMap map[string]time.Time
 var currentUrls map[string]bool
 var levelTwoUsername string
 var levelTwoServer string
+var serializeToDisk chan bool
+
+type Flag struct {
+	ServerId       string
+	UserId         string
+	BeganAt        time.Time
+	Duration       time.Duration
+	Result         int64
+	Who            string
+	WhoUserFoundIt bool
+}
+
+var knownFlags map[string]*Flag
+
+func serializeToDiskLoop() {
+	for {
+		<-serializeToDisk
+		log.Println("Beginning disk serialization")
+
+		var marshaledFlags []byte
+		var err error
+		if marshaledFlags, err = json.Marshal(knownFlags); err != nil {
+			log.Println("Error in marshalling: " + err.Error())
+			continue
+		}
+
+		var file *os.File
+		if file, err = os.Create("flagserialize.json"); err != nil {
+			log.Println("Error in serialization: " + err.Error())
+			continue
+		}
+
+		if _, err = file.Write(marshaledFlags); err != nil {
+			log.Println("Error in serialization stage 2: " + err.Error())
+			file.Close()
+			continue
+		}
+
+		if err = file.Close(); err != nil {
+			log.Println("Error closing file in serialization: " + err.Error())
+			continue
+		}
+
+		log.Println("Ending disk serialization")
+	}
+}
+
+func deserializeFromDisk(into interface{}) {
+	var f *os.File
+	var err error
+	if f, err = os.Open("flagserialize.json"); err != nil {
+		log.Println("Error deserializing (open): " + err.Error())
+		return
+	}
+	defer f.Close()
+
+	var dat []byte
+	if dat, err = ioutil.ReadAll(f); err != nil {
+		log.Println("Error deserializing (read): " + err.Error())
+		return
+	}
+
+	if err = json.Unmarshal(dat, into); err != nil {
+		log.Println("Error deserializing (unmarshal): " + err.Error())
+	}
+}
 
 func lockUsedMe(hostname string) bool {
 	currentDate, ok := usedMeMap[hostname]
@@ -57,6 +125,12 @@ func sendPublicMessage(conn *irc.Conn, sendingTo string, replyingTo string, serv
 func doTheBreak(conn *irc.Conn, urlToUse string, theirNick string, replyTo string, serverId string, userId string) {
 	defer unlockUrl(urlToUse)
 
+	thisFlag := new(Flag)
+	knownFlags[urlToUse] = thisFlag
+	thisFlag.ServerId = serverId
+	thisFlag.UserId = userId
+	thisFlag.Who = theirNick
+
 	// we need to open an SSH connection to our host
 	// we'll just use exec for this, because it knows about our keys
 	sshCommand := exec.Command("ssh", levelTwoUsername+"@"+levelTwoServer, "./pingit_recvit", "-servermode", urlToUse, levelTwoServer)
@@ -77,7 +151,6 @@ func doTheBreak(conn *irc.Conn, urlToUse string, theirNick string, replyTo strin
 	}
 
 	// now we just keep reading
-	var startedTime time.Time
 	for {
 		lineComplete := false
 		lineStr := ""
@@ -92,7 +165,7 @@ func doTheBreak(conn *irc.Conn, urlToUse string, theirNick string, replyTo strin
 
 		log.Printf("%s: REPORTED %s\n", urlToUse, lineStr)
 		if strings.HasPrefix(lineStr, "STARTED") {
-			startedTime = time.Now()
+			thisFlag.BeganAt = time.Now()
 		} else if strings.HasPrefix(lineStr, "BROKE ") {
 			// now we tell them, but not much :)
 			lineBits := strings.Split(lineStr, " ")
@@ -102,11 +175,20 @@ func doTheBreak(conn *irc.Conn, urlToUse string, theirNick string, replyTo strin
 			sendPublicMessage(conn, replyTo, theirNick, serverId, userId, fmt.Sprintf("I've broken %d%% of your flag!", (chunkBrokenInt64+1)*25))
 		} else if strings.HasPrefix(lineStr, "BROKE_ALL ") {
 			// now we tell them, but not much :)
-			//lineBits := strings.Split(lineStr, " ")
+			lineBits := strings.Split(lineStr, " ")
 			//chunkBrokenInt64, err := strconv.ParseInt(lineBits[1], 10, 0)
-			//actualNumberInt64, err := strconv.ParseInt(lineBits[2], 10, 0)
+			var actualNumberInt64 int64
+			var err error
+			actualNumberInt64, err = strconv.ParseInt(lineBits[1], 10, 64)
+			if err != nil {
+				log.Println(err.Error())
+				actualNumberInt64 = -1
+			}
 			// tell them
-			sendPublicMessage(conn, replyTo, theirNick, serverId, userId, "All your flag are belong to me! My badly optimized code did it in "+time.Since(startedTime).String()+", too.")
+			thisFlag.Duration = time.Since(thisFlag.BeganAt)
+			thisFlag.Result = actualNumberInt64
+			serializeToDisk <- true
+			sendPublicMessage(conn, replyTo, theirNick, serverId, userId, "All your flag are belong to me! My badly optimized code did it in "+strconv.FormatInt(int64(thisFlag.Duration.Seconds()), 10)+"s, too.")
 		} else if strings.HasPrefix(lineStr, "INVALID_URL") {
 			sendPublicMessage(conn, replyTo, theirNick, serverId, userId, "'"+urlToUse+"' doesn't seem like a valid flag URL.")
 			return
@@ -116,10 +198,19 @@ func doTheBreak(conn *irc.Conn, urlToUse string, theirNick string, replyTo strin
 
 func main() {
 	serverEightRegexp := regexp.MustCompile(`https://level08-([0-9]).stripe-ctf.com/user-([a-z]{10})/`)
+	flagNumberRegex := regexp.MustCompile(`[0-9]{12}`)
 	levelTwoUsername = "user-pnpgbrhmgp"
 	levelTwoServer = "level02-4.stripe-ctf.com"
 	usedMeMap = make(map[string]time.Time)
 	currentUrls = make(map[string]bool)
+
+	// deserialize from disk
+	knownFlags = make(map[string]*Flag)
+	deserializeFromDisk(&knownFlags)
+
+	serializeToDisk = make(chan bool)
+
+	go serializeToDiskLoop()
 
 	flag.Parse()
 
@@ -130,6 +221,7 @@ func main() {
 	c.AddHandler("connected", func(conn *irc.Conn, line *irc.Line) {
 		log.Println("Connected - joining channels")
 		conn.Join("#level8")
+		conn.Join("#level8-bottest")
 	})
 
 	quit := make(chan bool)
@@ -170,6 +262,20 @@ func main() {
 				log.Printf(" ---> Denied.\n")
 				conn.Notice(line.Nick, "You've already pasted a URL - I'm not doing another one so fast.")
 				return
+			}
+
+			// now check to see if this is one I've already done
+			flag, ok := knownFlags[meineUrl]
+			if ok && !(strings.Contains(lineData, "FORCEGRAB") && (line.Nick == "lukegb" || line.Nick == "lukegb_")) {
+				unlockUrl(meineUrl)
+				// oh
+				if flag.Result == 0 || flag.Result == -1 {
+					log.Printf("Hmm, flag.Result was %d\n", flag.Result)
+					// just keep going
+				} else {
+					conn.Privmsg(replyTo, fmt.Sprintf("%s: I've already done that flag. I did it in %ds, %s ago.", line.Nick, int64(flag.Duration.Seconds()), time.Since(flag.BeganAt.Add(flag.Duration)).String()))
+					return
+				}
 			}
 
 			// wooo
