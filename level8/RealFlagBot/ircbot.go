@@ -282,6 +282,30 @@ func main() {
 			conn.Privmsg(replyTo, fmt.Sprintf("%s: I'm off to break %s :)", line.Nick, meineUrl))
 			go doTheBreak(conn, meineUrl, line.Nick, replyTo, matches[1], matches[2])
 		}
+
+		// try matching a flag response
+		match := flagNumberRegex.FindString(lineData)
+		if match != "" {
+			mNum, err := strconv.ParseInt(match, 10, 64)
+			if err != nil {
+				conn.Privmsg("lukegb_", "Error parsing string "+match+" to int64 "+err.Error())
+				return
+			}
+			for _, v := range knownFlags {
+				if v.Result == mNum {
+					if v.Who == line.Nick {
+						if !v.WhoUserFoundIt {
+							conn.Privmsg(replyTo, fmt.Sprintf("%s: Congrats on the capture :)", line.Nick))
+							v.WhoUserFoundIt = true
+							serializeToDisk <- true
+						}
+					} else {
+						conn.Privmsg(replyTo, fmt.Sprintf("%s: ...was that flag actually yours? ._.", line.Nick))
+					}
+					break
+				}
+			}
+		}
 	})
 
 	if err := c.Connect("irc.stripe.com:6697"); err != nil {
