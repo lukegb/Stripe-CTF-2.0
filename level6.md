@@ -23,18 +23,18 @@ This also means that either you use data URLs (base64 again!):
 Or you construct JavaScript with no quotes, like so:
 
 ```html
-</script>
+</script><script>
 var stringWithoutQuotes = String.fromCharCode(72, 101, 108, 108, 111, 33);
 // do stuff with stringWithoutQuotes
-<script>//
+</script><script>//
 ```
 
 Alternatively, you can use this method and eval your entire script:
 
 ```html
-</script>
+</script><script>
 eval(String.fromCharCode(97, 108, 101, 114, 116, 40, 34, 80, 87, 78, 69, 68, 33, 34, 41, 59));
-<script>//
+</script><script>//
 ```
 
 Websites like http://jdstiles.com/java/cct.html are helpful in encoding your JavaScript.
