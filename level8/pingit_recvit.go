@@ -1,6 +1,7 @@
 package main
 
 import "net/http"
+import "syscall"
 import "log"
 import "strings"
 import "strconv"
@@ -31,6 +32,9 @@ var myHostname string
 var totalGuessesSoFar int
 
 var serverMode bool
+var requests int
+
+var SEEK_MODE = 1 // 0 = random, 1 = forwards, -1 = backwards
 
 func knownSoFar() string {
 	outputStr := ""
@@ -92,6 +96,10 @@ func processIt() {
 			}
 			thisPort := <-incPortChan
 			gotNum = thisPort - lastPort
+			if gotNum < 0 {
+				gotNum += 10000
+			}
+			lastPort = thisPort
 			if gotNum == expectedMed {
 				break // we expected this number, sadly
 			}
@@ -102,7 +110,6 @@ func processIt() {
 				wasOk = true // ALL RIGHT
 				break
 			}
-			lastPort = thisPort
 		}
 
 		// tell it we're done
@@ -128,7 +135,12 @@ func pingIt(num int, withWebhook bool, readResponse bool) bool {
 	finalStrStr += "]}"
 	finalStr := strings.NewReader(finalStrStr)
 
-	resp, _ := http.Post(levelAddress, "application/json", finalStr)
+	requests++
+	resp, err := http.Post(levelAddress, "application/json", finalStr)
+	if err != nil {
+		log.Println("Whoops, error while HTTPing: " + err.Error())
+		return false
+	}
 	defer resp.Body.Close()
 
 	if !readResponse {
@@ -181,6 +193,7 @@ func performFinalChunkBruteforcing() int {
 				currentGuess = i
 				currentGuessThrough++
 				if pingIt(i, false, true) {
+					log.Println("FOUND IT", i, "               ")
 					foundTheGuess <- i
 				}
 			}
@@ -198,6 +211,23 @@ func getAddressPort(address string) int {
 
 	port, _ := strconv.ParseInt(remBits[1], 10, 0)
 	return int(port)
+}
+
+func generatePermSet(mode int) []int {
+	if mode == 0 {
+		return rand.Perm(1000)
+	}
+
+	return make([]int, 0)
+}
+
+func generatePermNumber(permSet []int, n int, mode int) int {
+	if mode == 0 {
+		return permSet[mode]
+	} else if mode == 1 {
+		return n
+	}
+	return 1000 - n
 }
 
 func main() {
@@ -237,17 +267,30 @@ func main() {
 	startedRun = make(chan int)
 	incPortChan = make(chan int)
 	wasSuccess = make(chan bool)
+	requests = 0
 
 	go processIt()
 
 	wasBusy := true
 	var listener net.Listener
 	var err error
-	for wasBusy {
-		listenPort = strconv.FormatInt(int64(rand.Intn(4000)+2000), 10)
+	// did they specify a port number?
+	if strings.Contains(myHostname, ":") {
+		// yes, they did
+		splitBits := strings.Split(myHostname, ":")
+		myHostname = splitBits[0]
+		listenPort = splitBits[1]
 		listener, err = net.Listen("tcp4", ":"+listenPort)
-		if err == nil {
-			wasBusy = false
+		if err != nil {
+			log.Fatalln(err)
+		}
+	} else {
+		for wasBusy {
+			listenPort = strconv.FormatInt(int64(rand.Intn(4000)+2000), 10)
+			listener, err = net.Listen("tcp4", ":"+listenPort)
+			if err == nil {
+				wasBusy = false
+			}
 		}
 	}
 
@@ -276,27 +319,37 @@ func main() {
 
 	startTime = time.Now()
 
-	go terminalUpdater()
 	if !serverMode {
 		log.Println("Listening on", listenPort)
 		log.Println("I am going to ping", levelAddress, "and my hostname is", myHostname)
 		fmt.Println()
 		fmt.Println()
+		defer fmt.Println()
+		defer fmt.Println()
 	} else {
+		// wait for character
+		tb := make([]byte, 1)
+		var Stdin = os.NewFile(uintptr(syscall.Stdin), "/dev/stdin")
+		Stdin.Read(tb)
 		fmt.Println("STARTED")
 	}
+	go terminalUpdater()
 
 	for ; currentChunk < 3; currentChunk++ {
 		// generate my permutation set
-		permSet := rand.Perm(1000)
+		//permSet := generatePermSet(SEEK_MODE)
 		for cN := startNumber; cN < endNumber; cN++ {
 			currentGuessThrough = int(cN)
-			startedRun <- permSet[cN]
+			//startedRun <- generatePermNumber(permSet, cN, SEEK_MODE)
+			startedRun <- cN
 			wasSuccess := <-wasSuccess
 			if wasSuccess {
-				previousChunks[currentChunk] = permSet[cN]
+				//thisNum := generatePermNumber(permSet, cN, SEEK_MODE)
+				//previousChunks[currentChunk] = thisNum
+				previousChunks[currentChunk] = cN
 				if serverMode {
-					fmt.Println("BROKE", currentChunk, permSet[cN])
+					//fmt.Println("BROKE", currentChunk, generatePermNumber(permSet, cN, SEEK_MODE))
+					fmt.Println("BROKE", currentChunk, cN)
 				}
 				break
 			}
@@ -310,7 +363,7 @@ func main() {
 	// end time
 	endTime := time.Now().Sub(startTime)
 	if !serverMode {
-		log.Printf("\nTook %s.\n", endTime.String())
+		log.Printf("\nTook %s and %d requests.\n", endTime.String(), requests)
 		log.Printf("The final result was: %s\n", knownSoFar())
 	} else {
 		fmt.Println("BROKE_ALL", knownSoFar())

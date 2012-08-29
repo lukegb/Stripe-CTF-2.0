@@ -122,7 +122,7 @@ func sendPublicMessage(conn *irc.Conn, sendingTo string, replyingTo string, serv
 	conn.Privmsg(sendingTo, fmt.Sprintf("%s: (08-%s - %s) %s", replyingTo, serverId, userId, message))
 }
 
-func doTheBreak(conn *irc.Conn, urlToUse string, theirNick string, replyTo string, serverId string, userId string) {
+func doTheBreak(conn *irc.Conn, urlToUse string, theirNick string, replyTo string, serverId string, userId string, shouldSave bool) {
 	defer unlockUrl(urlToUse)
 
 	thisFlag := new(Flag)
@@ -198,6 +198,7 @@ func doTheBreak(conn *irc.Conn, urlToUse string, theirNick string, replyTo strin
 
 func main() {
 	serverEightRegexp := regexp.MustCompile(`https://level08-([0-9]).stripe-ctf.com/user-([a-z]{10})/`)
+	serverEightBonusRegexp := regexp.MustCompile(`https://level8-bonus.danopia.net/([a-z0-9]{32})/`)
 	flagNumberRegex := regexp.MustCompile(`[0-9]{12}`)
 	levelTwoUsername = "user-pnpgbrhmgp"
 	levelTwoServer = "level02-4.stripe-ctf.com"
@@ -222,6 +223,7 @@ func main() {
 		log.Println("Connected - joining channels")
 		conn.Join("#level8")
 		conn.Join("#level8-bottest")
+		conn.Join("#level8-bonus")
 	})
 
 	quit := make(chan bool)
@@ -232,7 +234,6 @@ func main() {
 	c.AddHandler("PRIVMSG", func(conn *irc.Conn, line *irc.Line) {
 		// try matching the regexp
 		lineData := strings.Join(line.Args[1:], " ")
-		matches := serverEightRegexp.FindStringSubmatch(lineData)
 		sentTo := line.Args[0]
 		replyTo := line.Args[0]
 		if sentTo[0] != ([]uint8("#"))[0] {
@@ -240,6 +241,7 @@ func main() {
 			replyTo = line.Nick
 		}
 		//log.Printf("%s <%s> %s\n", line.Args[0], line.Nick, lineData)
+		matches := serverEightRegexp.FindStringSubmatch(lineData)
 		if matches != nil {
 			meineUrl := fmt.Sprintf("https://level08-%s.stripe-ctf.com/user-%s/", matches[1], matches[2])
 			log.Printf(" ---> FOUND URL: %s - using %s\n", matches[0], meineUrl)
@@ -280,7 +282,14 @@ func main() {
 
 			// wooo
 			conn.Privmsg(replyTo, fmt.Sprintf("%s: I'm off to break %s :)", line.Nick, meineUrl))
-			go doTheBreak(conn, meineUrl, line.Nick, replyTo, matches[1], matches[2])
+			go doTheBreak(conn, meineUrl, line.Nick, replyTo, matches[1], matches[2], true)
+			return
+		}
+
+		// now try matching a l8-bonus round
+		matches = serverEightBonusRegexp.FindStringSubmatch(lineData)
+		if matches != nil {
+			return
 		}
 
 		// try matching a flag response
@@ -305,6 +314,7 @@ func main() {
 					break
 				}
 			}
+			return
 		}
 	})
 
